@@ -12,9 +12,9 @@
 #define NREG			125
 #define START_REG		35100
 #define METER_PWR		36008
-#define PV_PWR			35105
-#define BATT_PWR		35182
-#define TOTAL_INV_POWER	35138
+#define PV_DATA			35103
+#define BATT_DATA		35180
+#define TOTAL_INV_POWER		35138
 #define TOTAL_LOAD_POWER	35172
 
 struct pwr_inverter{
@@ -23,6 +23,10 @@ struct pwr_inverter{
         int32_t meter;
 	int32_t out;
 	int32_t load;
+	float batt_v;
+	float batt_c;
+	float pv_v;
+	float pv_c;
 };
 
 struct pwr_inverter pwr1;
@@ -35,7 +39,8 @@ void print_pwr();
 void read_pwr();
 int16_t read_wreg(uint16_t addr);
 int32_t read_dwreg(uint16_t addr);
-void print_batt_data();
+void get_batt_data();
+void get_pv1_data();
 int post_data(CURL *curl, struct pwr_inverter *pw);
 
 
@@ -75,15 +80,12 @@ int main()
 	modbus_set_response_timeout(ctx, 0, 50000);
 
 
-
-
 	for(;;){
-		//print_batt_data();
-		//print_data();
+		get_pv1_data();
+		get_batt_data();
 		read_pwr();
 		print_pwr();
 
-		
 		 if (curl){
                         post_data(curl, &pwr1);
                 }
@@ -94,21 +96,40 @@ int main()
 	modbus_free(ctx);
 }
 
-void print_batt_data()
+void get_batt_data()
 {
 	int num;
-	int32_t pw;
+	uint16_t r[8];
 
-	num = modbus_read_registers(ctx, 35180, 4, (uint16_t *)reg);
+	num = modbus_read_registers(ctx, BATT_DATA, 4, r);
 	if (num != 4){
 		fprintf(stderr, "Failed to read: %s\n", modbus_strerror(errno));
 		return;
 	}
-	fprintf(stdout,"%.1f,%.1f,",(float)reg[0]/10.0, ((int16_t)reg[1])/10.0);
-	pw = MODBUS_GET_INT32_FROM_INT16(reg,2);
-	//pw = (int32_t)reg[2]<<16 | (int32_t)reg[3];
-	fprintf(stdout,"%d\r\n",pw);
+	pwr1.batt_v = r[0]/10.0;
+	pwr1.batt_c = ((int16_t)r[1])/10.0;
+	pwr1.batt = MODBUS_GET_INT32_FROM_INT16(r,2);
 
+	fprintf(stdout,"%.1f,%.1f,\r\n", pwr1.batt_v, pwr1.batt_c);
+	//pw = (int32_t)reg[2]<<16 | (int32_t)reg[3];
+	//fprintf(stdout,"%d\r\n",pw);
+}
+
+void get_pv1_data()
+{
+  	int num;
+        uint16_t r[8];
+
+        num = modbus_read_registers(ctx, PV_DATA, 4, r);
+        if (num != 4){
+                fprintf(stderr, "Failed to read: %s\n", modbus_strerror(errno));
+                return;
+        }
+        pwr1.pv_v = r[0]/10.0;
+        pwr1.pv_c = ((int16_t)r[1])/10.0;
+        pwr1.pv = MODBUS_GET_INT32_FROM_INT16(r,2);
+
+        fprintf(stdout,"%.1f,%.1f,\r\n", pwr1.pv_v, pwr1.pv_c);
 }
 
 
@@ -120,8 +141,8 @@ void print_pwr()
 void read_pwr()
 {
 	pwr1.meter = read_wreg(METER_PWR);
-	pwr1.pv = read_dwreg(PV_PWR);
-	pwr1.batt = read_dwreg(BATT_PWR);
+	//pwr1.pv = read_dwreg(PV_PWR);
+	//pwr1.batt = read_dwreg(BATT_PWR);
 	pwr1.out = read_wreg(TOTAL_INV_POWER);
 	pwr1.load = read_wreg(TOTAL_LOAD_POWER);
 }
@@ -185,11 +206,12 @@ int post_data(CURL *curl, struct pwr_inverter *pw)
 {
 	 CURLcode res;
 
-	char post_data[128];
-	char sval[64];
+	char post_data[256];
+	char sval[128];
 
 	strcpy(post_data, "gw6000eh,param=power "); 
-	sprintf(sval,"pv=%d,batt=%d,meter=%d,out=%d,load=%d", pw->pv,pw->batt,pw->meter,pw->out,pw->load);
+	sprintf(sval,"pv=%d,batt=%d,meter=%d,out=%d,load=%d,batt_v=%f,batt_c=%f,pv_v=%f,pv_c=%f",
+		pw->pv,pw->batt,pw->meter,pw->out,pw->load,pw->batt_v,pw->batt_c,pw->pv_v,pw->pv_c);
 	strcat(post_data,sval);
 
 	curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:8086/write?db=pv1");	
